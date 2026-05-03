@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "lwip/sys.h"
 #include <string.h>
+#include <sys/time.h>
 
 /* ============================================================================
  * Time Functions
@@ -20,15 +21,28 @@ uint32_t wireguard_sys_now() {
 
 void wireguard_tai64n_now(uint8_t *output) {
     // TAI64N format: 8 bytes seconds + 4 bytes nanoseconds
-    // For simplicity, use Unix epoch time
-    uint64_t now_us = esp_timer_get_time();
-    uint64_t seconds = now_us / 1000000ULL;
-    uint32_t nanoseconds = (now_us % 1000000ULL) * 1000;
+    struct timeval tv = {0};
+    gettimeofday(&tv, NULL);
 
-    // Log raw uptime before TAI offset (only every ~5s to avoid spam)
+    uint64_t seconds;
+    uint32_t nanoseconds;
+    bool using_wall_clock = tv.tv_sec >= 1700000000L; // 2023-11-14; comfortably past ESP boot epoch.
+    if (using_wall_clock) {
+        seconds = (uint64_t)tv.tv_sec;
+        nanoseconds = (uint32_t)tv.tv_usec * 1000;
+    } else {
+        uint64_t now_us = esp_timer_get_time();
+        seconds = now_us / 1000000ULL;
+        nanoseconds = (now_us % 1000000ULL) * 1000;
+    }
+
+    // Log raw timestamp before TAI offset (only every ~5s to avoid spam)
     static uint64_t last_log_s = 0;
     if (seconds - last_log_s >= 5) {
-        printf("[TAI64N] uptime=%llu s, nano=%lu\n", (unsigned long long)seconds, (unsigned long)nanoseconds);
+        printf("[TAI64N] %s=%llu s, nano=%lu\n",
+               using_wall_clock ? "wall_clock" : "uptime_fallback",
+               (unsigned long long)seconds,
+               (unsigned long)nanoseconds);
         last_log_s = seconds;
     }
 
