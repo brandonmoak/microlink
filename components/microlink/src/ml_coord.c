@@ -1391,11 +1391,11 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
      * (v1 does the same with h2_buffer).
      * Smart timeout: extend to 60s for large tailnets (300+ peers = 240KB+). */
     uint8_t *h2_recv = ml_psram_malloc(ML_H2_BUFFER_SIZE);  /* 512KB for 300+ peer tailnets */
-    if (!h2_recv) return -1;
+    if (!h2_recv) {
+        ESP_LOGE(TAG, "Failed to allocate H2 receive buffer (%dKB)", (int)(ML_H2_BUFFER_SIZE / 1024));
+        return -1;
+    }
     size_t h2_total = 0;
-
-    uint8_t *resp_buf = ml_psram_malloc(ML_JSON_BUFFER_SIZE);
-    if (!resp_buf) { free(h2_recv); return -1; }
     size_t json_total = 0;
 
     /* Set extended recv timeout for large MapResponse (60 seconds) */
@@ -1412,10 +1412,13 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
      * (60s) before proceeding, which dominates connection time on cellular. */
     bool got_end_stream = false;
     for (int read_count = 0; read_count < 200; read_count++) {
-        uint8_t *frame_buf = ml_psram_malloc(65536);
-        if (!frame_buf) break;
+        uint8_t *frame_buf = ml_psram_malloc(4096);
+        if (!frame_buf) {
+            ESP_LOGE(TAG, "Failed to allocate Noise frame buffer (4KB)");
+            break;
+        }
 
-        int frame_len = noise_recv(ml, noise, frame_buf, 65536);
+        int frame_len = noise_recv(ml, noise, frame_buf, 4096);
         if (frame_len <= 0) {
             free(frame_buf);
             break;
@@ -1490,6 +1493,8 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
              (int)(h2_total / 1024),
              (unsigned long)(ml_get_time_ms() - recv_start_ms));
 
+    uint8_t *resp_buf = NULL;
+
     /* Now parse complete H2 frames from accumulated buffer */
     int fpos = 0;
     while (fpos + 9 <= (int)h2_total) {
@@ -1512,6 +1517,15 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
 
         if (f_type == 0x00 && f_len > 0) {  /* DATA frame */
             if (json_total + f_len < ML_JSON_BUFFER_SIZE) {
+                uint8_t *new_resp = realloc(resp_buf, json_total + f_len + 1);
+                if (!new_resp) {
+                    ESP_LOGE(TAG, "Failed to grow MapResponse JSON buffer to %d bytes",
+                             (int)(json_total + f_len + 1));
+                    free(resp_buf);
+                    free(h2_recv);
+                    return -1;
+                }
+                resp_buf = new_resp;
                 memcpy(resp_buf + json_total, h2_recv + fpos, f_len);
                 json_total += f_len;
             }
@@ -1519,7 +1533,6 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
 
         fpos += f_len;
     }
-    free(h2_recv);
 
     /* Send connection-level WINDOW_UPDATE to replenish HTTP/2 flow control.
      * Stream 3 is already closed (END_STREAM received), so only update stream 0.
@@ -1534,8 +1547,11 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
     if (json_total == 0) {
         ESP_LOGW(TAG, "Empty MapResponse");
         free(resp_buf);
+        free(h2_recv);
         return -1;
     }
+    resp_buf[json_total] = '\0';
+    free(h2_recv);
 
     ESP_LOGI(TAG, "MapResponse JSON: %d bytes", (int)json_total);
 
@@ -1583,6 +1599,8 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
         free(resp_buf);
         return -1;
     }
+
+    free(resp_buf);
 
     /* Debug: log all top-level fields in MapResponse (from v1 lines 3053-3072) */
     {
@@ -1777,7 +1795,6 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
     }
 
     cJSON_Delete(map_json);
-    free(resp_buf);
 
     int64_t t_map_done = esp_timer_get_time();
     ESP_LOGI(TAG, "[TIMING] MapResponse recv+parse: %lld ms (total map: %lld ms, %dKB)",
