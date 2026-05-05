@@ -81,6 +81,84 @@ static int hex_to_bytes(const char *hex, uint8_t *bytes, size_t max_len) {
     return hex_len / 2;
 }
 
+static uint32_t parse_dns_resolver_ip(const char *addr) {
+    if (!addr || addr[0] == '\0') {
+        return 0;
+    }
+
+    char ip_buf[16] = {0};
+    size_t i = 0;
+    while (addr[i] != '\0' && addr[i] != ':' && i < sizeof(ip_buf) - 1) {
+        ip_buf[i] = addr[i];
+        i++;
+    }
+
+    return microlink_parse_ip(ip_buf);
+}
+
+static uint32_t parse_dns_resolver_item(cJSON *item) {
+    if (cJSON_IsString(item)) {
+        return parse_dns_resolver_ip(item->valuestring);
+    }
+
+    if (cJSON_IsObject(item)) {
+        cJSON *addr = cJSON_GetObjectItem(item, "Addr");
+        if (addr && cJSON_IsString(addr)) {
+            return parse_dns_resolver_ip(addr->valuestring);
+        }
+
+        cJSON *ip = cJSON_GetObjectItem(item, "IP");
+        if (ip && cJSON_IsString(ip)) {
+            return parse_dns_resolver_ip(ip->valuestring);
+        }
+    }
+
+    return 0;
+}
+
+static void parse_dns_config(microlink_t *ml, cJSON *map_json) {
+    cJSON *dns_config = cJSON_GetObjectItem(map_json, "DNSConfig");
+    if (!dns_config || !cJSON_IsObject(dns_config)) {
+        return;
+    }
+
+    cJSON *resolvers = cJSON_GetObjectItem(dns_config, "Resolvers");
+    if (resolvers && cJSON_IsArray(resolvers)) {
+        cJSON *resolver = NULL;
+        cJSON_ArrayForEach(resolver, resolvers) {
+            uint32_t ip = parse_dns_resolver_item(resolver);
+            if (ip != 0) {
+                ml->dns_server_ip = ip;
+                char ip_str[16];
+                microlink_ip_to_str(ip, ip_str);
+                ESP_LOGI(TAG, "Tailnet DNS resolver: %s", ip_str);
+                return;
+            }
+        }
+    }
+
+    cJSON *routes = cJSON_GetObjectItem(dns_config, "Routes");
+    if (routes && cJSON_IsObject(routes)) {
+        cJSON *route = NULL;
+        cJSON_ArrayForEach(route, routes) {
+            if (!cJSON_IsArray(route)) {
+                continue;
+            }
+            cJSON *resolver = NULL;
+            cJSON_ArrayForEach(resolver, route) {
+                uint32_t ip = parse_dns_resolver_item(resolver);
+                if (ip != 0) {
+                    ml->dns_server_ip = ip;
+                    char ip_str[16];
+                    microlink_ip_to_str(ip, ip_str);
+                    ESP_LOGI(TAG, "Tailnet DNS route resolver: %s", ip_str);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 /* ============================================================================
  * TCP I/O helpers for coord socket (owned exclusively by this task)
  * ========================================================================== */
@@ -1714,6 +1792,7 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
 
     /* Parse peers */
     parse_peers_from_map_response(ml, map_json);
+    parse_dns_config(ml, map_json);
 
     /* Extract DERPMap if present — parse all regions and nodes */
     cJSON *derp_map = cJSON_GetObjectItem(map_json, "DERPMap");

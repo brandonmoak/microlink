@@ -416,6 +416,9 @@ struct microlink_s {
     uint8_t derp_region_count;
     uint16_t derp_home_region;      /* Our PreferredDERP region */
 
+    /* Tailnet DNS resolver discovered from MapResponse DNSConfig */
+    uint32_t dns_server_ip;         /* IPv4 in host byte order, 0 if unavailable */
+
     /* Key expiry (parsed from MapResponse self-node) */
     int64_t key_expiry_epoch;       /* Unix epoch seconds, 0 = no expiry */
     bool key_expired;               /* true if Node.Expired == true */

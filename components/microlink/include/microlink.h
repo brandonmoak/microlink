@@ -197,6 +197,12 @@ void microlink_ip_to_str(uint32_t ip, char *buf);
 uint32_t microlink_parse_ip(const char *ip_str);
 
 /**
+ * @brief Get the Tailnet DNS resolver discovered from MapResponse DNSConfig
+ * @return VPN IP in host byte order, 0 if not advertised
+ */
+uint32_t microlink_get_dns_server_ip(const microlink_t *ml);
+
+/**
  * @brief Get default device name based on MAC address
  * @return Static string like "esp32-a1b2c3"
  */

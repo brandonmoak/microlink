@@ -666,6 +666,10 @@ uint32_t microlink_parse_ip(const char *ip_str) {
     return (a << 24) | (b << 16) | (c << 8) | d;
 }
 
+uint32_t microlink_get_dns_server_ip(const microlink_t *ml) {
+    return ml ? ml->dns_server_ip : 0;
+}
+
 const char *microlink_default_device_name(void) {
     static char name[48] = {0};
     if (name[0] == 0) {
