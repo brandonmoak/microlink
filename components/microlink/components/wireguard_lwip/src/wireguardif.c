@@ -539,9 +539,10 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 								if (dest_ok) {
 									// Send packet to be processed by LWIP
 									WG_DEBUG("[WG_RX_IP] Passing %u bytes to IP layer\n", (unsigned)pbuf->tot_len);
-									ip_input(pbuf, device->netif);
-									// pbuf is owned by IP layer now
-									pbuf = NULL;
+									if (device->netif->input && device->netif->input(pbuf, device->netif) == ERR_OK) {
+										// pbuf is owned by IP layer now
+										pbuf = NULL;
+									}
 								} else {
 									WG_DEBUG("[WG_RX_IP] DROPPED: dest_ok=false\n");
 								}

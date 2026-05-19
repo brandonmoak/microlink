@@ -257,7 +257,7 @@ int microlink_tcp_recv(microlink_tcp_socket_t *sock, void *buffer, size_t len,
         /* Peer closed connection */
         ESP_LOGI(TAG, "TCP peer closed connection");
         sock->connected = false;
-        return -1;
+        return 0;
     }
 
     return n;
